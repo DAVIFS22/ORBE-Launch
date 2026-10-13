@@ -1,0 +1,86 @@
+name: ORBE Launch - Build uploaded ZIP and publish assets
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Tag do Release já publicado (ex.: v0.3.1)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Determine release tag
+        id: release
+        shell: pwsh
+        env:
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.release_tag }}
+        run: |
+          $tag = $env:EVENT_TAG
+          if (-not $tag) { $tag = $env:INPUT_TAG }
+          if (-not $tag) { throw "Não foi possível determinar a tag do Release." }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Download ZIP source attached to this Release
+        shell: pwsh
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          New-Item -ItemType Directory -Force source-archive | Out-Null
+          gh release download $env:TAG --repo $env:GH_REPO --pattern "*.zip" --dir source-archive
+          $zip = Get-ChildItem source-archive -Filter "*.zip" | Select-Object -First 1
+          if (-not $zip) { throw "Nenhum ZIP de código-fonte foi anexado ao Release $env:TAG." }
+          New-Item -ItemType Directory -Force extracted | Out-Null
+          Expand-Archive -LiteralPath $zip.FullName -DestinationPath extracted -Force
+          $manifest = Get-ChildItem extracted -Filter Cargo.toml -Recurse | Select-Object -First 1
+          if (-not $manifest) { throw "O ZIP não contém Cargo.toml. Envie um ZIP do código-fonte Rust, não um ZIP de instalador." }
+          $root = $manifest.Directory.FullName
+          "SOURCE_DIR=$root" >> $env:GITHUB_ENV
+          Write-Host "Código-fonte encontrado em $root"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build Windows executable from uploaded ZIP
+        shell: pwsh
+        run: |
+          Set-Location $env:SOURCE_DIR
+          cargo build --release -p artcraft-launcher --bin orbe-launcher --target x86_64-pc-windows-msvc
+          $exe = Join-Path $env:SOURCE_DIR "target\x86_64-pc-windows-msvc\release\orbe-launcher.exe"
+          if (-not (Test-Path $exe)) { throw "Compilação terminou sem gerar orbe-launcher.exe." }
+          New-Item -ItemType Directory -Force "$env:GITHUB_WORKSPACE\dist" | Out-Null
+          Copy-Item $exe "$env:GITHUB_WORKSPACE\dist\ORBE-Launch.exe"
+          Set-Location "$env:GITHUB_WORKSPACE\dist"
+          Compress-Archive -Path ORBE-Launch.exe -DestinationPath ORBE-Launch-Windows-x64-portable.zip -Force
+
+      - name: Attach EXE and portable ZIP to the same Release
+        shell: pwsh
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          gh release upload $env:TAG "$env:GITHUB_WORKSPACE\dist\ORBE-Launch.exe" "$env:GITHUB_WORKSPACE\dist\ORBE-Launch-Windows-x64-portable.zip" --repo $env:GH_REPO --clobber
+
+      - name: Keep build artifacts available
+        uses: actions/upload-artifact@v4
+        with:
+          name: ORBE-Launch-Windows-x64-${{ steps.release.outputs.tag }}
+          path: |
+            dist/ORBE-Launch.exe
+            dist/ORBE-Launch-Windows-x64-portable.zip
+          if-no-files-found: error
