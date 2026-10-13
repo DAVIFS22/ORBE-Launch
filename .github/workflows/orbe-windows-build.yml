@@ -1,0 +1,32 @@
+name: ORBE Launcher Windows Build
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+permissions:
+  contents: read
+jobs:
+  build-windows-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+      - name: Build ORBE Launcher
+        run: cargo build --release -p artcraft-launcher --bin orbe-launcher --target x86_64-pc-windows-msvc
+      - name: Assemble portable package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist\ORBE-Launcher-portable | Out-Null
+          Copy-Item target\x86_64-pc-windows-msvc\release\orbe-launcher.exe dist\ORBE-Launcher-portable\
+          Copy-Item LICENSE-MIT, LICENSE-APACHE, NOTICE, ATTRIBUTION.md, README.md dist\ORBE-Launcher-portable\
+          Set-Content dist\ORBE-Launcher-portable\portable.txt ''
+          Compress-Archive -Path dist\ORBE-Launcher-portable\* -DestinationPath dist\ORBE-Launcher-Windows-x64-portable.zip -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ORBE-Launcher-Windows-x64
+          path: |
+            target/x86_64-pc-windows-msvc/release/orbe-launcher.exe
+            dist/ORBE-Launcher-Windows-x64-portable.zip

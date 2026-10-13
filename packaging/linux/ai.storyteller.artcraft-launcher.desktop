@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=ORBE Launcher
+GenericName=App Launcher
+Comment=Install, update and launch the ORBE Apps
+Exec=orbe-launcher
+TryExec=orbe-launcher
+Icon=br.orbe.launcher
+Terminal=false
+StartupNotify=true
+StartupWMClass=orbe-launcher
+Categories=Utility;PackageManager;
+Keywords=artcraft;craft;launcher;installer;updater;photocraft;filmcraft;apps;
