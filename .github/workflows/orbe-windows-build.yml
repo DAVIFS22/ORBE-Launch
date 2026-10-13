@@ -1,32 +1,70 @@
-name: ORBE Launcher Windows Build
+name: ORBE Launch Windows Build and Release
+
 on:
-  workflow_dispatch:
   push:
     branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Tag do Release para anexar o EXE (ex.: v0.3.0). Deixe vazio para apenas compilar."
+        required: false
+        type: string
+  release:
+    types: [published]
+
 permissions:
-  contents: read
+  contents: write
+
 jobs:
   build-windows-x64:
     runs-on: windows-latest
+    env:
+      CARGO_TERM_COLOR: always
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
-      - uses: Swatinem/rust-cache@v2
-      - name: Build ORBE Launcher
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build ORBE Launch EXE
         run: cargo build --release -p artcraft-launcher --bin orbe-launcher --target x86_64-pc-windows-msvc
-      - name: Assemble portable package
+
+      - name: Prepare portable ZIP
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force dist\ORBE-Launcher-portable | Out-Null
-          Copy-Item target\x86_64-pc-windows-msvc\release\orbe-launcher.exe dist\ORBE-Launcher-portable\
-          Copy-Item LICENSE-MIT, LICENSE-APACHE, NOTICE, ATTRIBUTION.md, README.md dist\ORBE-Launcher-portable\
-          Set-Content dist\ORBE-Launcher-portable\portable.txt ''
-          Compress-Archive -Path dist\ORBE-Launcher-portable\* -DestinationPath dist\ORBE-Launcher-Windows-x64-portable.zip -Force
-      - uses: actions/upload-artifact@v4
+          New-Item -ItemType Directory -Force dist\ORBE-Launch-Windows-x64 | Out-Null
+          Copy-Item target\x86_64-pc-windows-msvc\release\orbe-launcher.exe dist\ORBE-Launch-Windows-x64\ORBE-Launch.exe
+          Copy-Item LICENSE-MIT, LICENSE-APACHE, NOTICE, ATTRIBUTION.md, README.md dist\ORBE-Launch-Windows-x64\
+          Compress-Archive -Path dist\ORBE-Launch-Windows-x64\* -DestinationPath dist\ORBE-Launch-Windows-x64-portable.zip -Force
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: ORBE-Launcher-Windows-x64
+          name: ORBE-Launch-Windows-x64
           path: |
-            target/x86_64-pc-windows-msvc/release/orbe-launcher.exe
-            dist/ORBE-Launcher-Windows-x64-portable.zip
+            dist/ORBE-Launch-Windows-x64/ORBE-Launch.exe
+            dist/ORBE-Launch-Windows-x64-portable.zip
+          if-no-files-found: error
+
+      - name: Attach EXE and portable ZIP to GitHub Release
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG_INPUT: ${{ inputs.release_tag }}
+          RELEASE_EVENT_TAG: ${{ github.event.release.tag_name }}
+        shell: pwsh
+        run: |
+          $tag = $env:RELEASE_EVENT_TAG
+          if (-not $tag) { $tag = $env:RELEASE_TAG_INPUT }
+          if (-not $tag) { throw "Informe release_tag ao executar manualmente." }
+          gh release view $tag --repo $env:GH_REPO
+          gh release upload $tag dist/ORBE-Launch-Windows-x64/ORBE-Launch.exe dist/ORBE-Launch-Windows-x64-portable.zip --repo $env:GH_REPO --clobber
